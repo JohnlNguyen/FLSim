@@ -10,6 +10,7 @@ from hydra.core.config_store import ConfigStore
 from .base_client import ClientConfig
 from .dp_client import DPClientConfig
 from .fednova_client import FedNovaClientConfig
+from .fedsgd_client import FedSGDClientConfig
 
 ConfigStore.instance().store(
     name="base_client",
@@ -26,5 +27,11 @@ ConfigStore.instance().store(
 ConfigStore.instance().store(
     name="base_fednova_client",
     node=FedNovaClientConfig,
+    group="client",
+)
+
+ConfigStore.instance().store(
+    name="base_fedsgd_client",
+    node=FedSGDClientConfig,
     group="client",
 )

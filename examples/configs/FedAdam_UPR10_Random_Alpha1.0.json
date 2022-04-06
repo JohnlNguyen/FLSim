@@ -1,0 +1,57 @@
+{
+    "config": {
+      "trainer": {
+        "_base_": "base_sync_trainer",
+        "epochs": 100,
+        "server": {
+          "_base_": "base_sync_server",
+          "server_optimizer": {
+            "_base_": "base_fed_adam",
+            "lr": 0.0013233194937248623,
+            "beta1": 0.772769252805354,
+            "weight_decay": 0.0005
+          },
+          "active_user_selector": {
+            "_base_": "base_uniformly_random_active_user_selector",
+            "random_with_replacement": false,
+            "user_selector_seed": 0
+          }
+        },
+        "client": {
+          "_base_": "base_client",
+          "epochs": 1,
+          "random_seed": 0,
+          "optimizer": {
+            "_base_": "base_optimizer_sgd",
+            "lr": 0.018252149985287652,
+            "momentum": 0
+          }
+        },
+        "users_per_round": 10,
+        "train_metrics_reported_per_epoch": 10,
+        "always_keep_trained_model": false,
+        "report_train_metrics": true,
+        "do_eval": true,
+        "report_train_metrics_after_aggregation": false
+      },
+      "data": {
+        "local_batch_size": 32,
+        "train_file": "/data/home/ngjhn/FLSim/examples/data/cifar_100users_alpha1.0_seed0_train.pt",
+        "log_dir": "runs/FedAdam_UPR=10_Random_Alpha1.0"
+      },
+      "model": {
+        "use_resnet": false,
+        "pretrained": false,
+        "num_trials": 1,
+        "target_eval": 60,
+        "window_size": 3,
+        "average_type": "ema",
+        "mean": 3
+      },
+      "distributed_world_size": 1,
+      "use_cuda_if_available": true,
+      "memory_requirement": "10G",
+      "rank": 0,
+      "non_fl": false
+    }
+  }
