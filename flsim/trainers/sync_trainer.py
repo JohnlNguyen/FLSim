@@ -16,7 +16,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import torch
 from flsim.clients.base_client import Client
 from flsim.clients.dp_client import DPClientConfig, DPClient
-from flsim.clients.fednova_client import FedNovaClientConfig, FedNovaClient
+
 from flsim.common.timeline import Timeline
 from flsim.data.data_provider import IFLDataProvider
 from flsim.interfaces.metrics_reporter import IFLMetricsReporter, Metric, TrainingStage
@@ -38,6 +38,22 @@ from flsim.utils.fl.stats import RandomVariableStatsTracker
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from tqdm import tqdm
+import numpy as np
+
+
+def cosine(model1, model2):
+    d1 = torch.cat([p.flatten() for p in model1.parameters()])
+    d2 = torch.cat([p.flatten() for p in model2.parameters()])
+    return torch.nn.CosineSimilarity(dim=0, eps=1e-6)(d1, d2)
+
+
+def norm(model):
+    """
+    Calculates the l-2 norm of the user updates
+    """
+    norms = [param.norm(2) for param in model.parameters()]
+    norm = torch.tensor(norms).norm(2)
+    return norm.item()
 
 
 class SyncTrainer(FLTrainer):
@@ -58,7 +74,8 @@ class SyncTrainer(FLTrainer):
     ):
         init_self_cfg(
             self,
-            component_class=__class__,  # pyre-fixme[10]: Name `__class__` is used but not defined.
+            # pyre-fixme[10]: Name `__class__` is used but not defined.
+            component_class=__class__,
             config_class=SyncTrainerConfig,
             **kwargs,
         )
@@ -178,7 +195,8 @@ class SyncTrainer(FLTrainer):
         users_per_round = min(self.cfg.users_per_round, num_total_users)
 
         self.data_provider = data_provider
-        num_rounds_in_epoch = self.rounds_in_one_epoch(num_total_users, users_per_round)
+        num_rounds_in_epoch = self.rounds_in_one_epoch(
+            num_total_users, users_per_round)
         num_users_on_worker = data_provider.num_train_users()
         self.logger.debug(
             f"num_users_on_worker: {num_users_on_worker}, "
@@ -186,8 +204,10 @@ class SyncTrainer(FLTrainer):
             f"num_total_users: {num_total_users}"
         )
         # torch.multinomial requires int instead of float, cast it as int
-        users_per_round_on_worker = int(users_per_round / distributed_world_size)
-        self._validate_users_per_round(users_per_round_on_worker, num_users_on_worker)
+        users_per_round_on_worker = int(
+            users_per_round / distributed_world_size)
+        self._validate_users_per_round(
+            users_per_round_on_worker, num_users_on_worker)
 
         self.logger.info("Start training")
         if self.logger.isEnabledFor(logging.DEBUG):
@@ -231,7 +251,8 @@ class SyncTrainer(FLTrainer):
                 )
 
                 # training on selected clients for the round
-                self.logger.info(f"# clients/round on worker {rank}: {len(clients)}.")
+                self.logger.info(
+                    f"# clients/round on worker {rank}: {len(clients)}.")
                 self._train_one_round(
                     timeline=timeline,
                     clients=clients,
@@ -284,7 +305,8 @@ class SyncTrainer(FLTrainer):
             self._post_epoch_client_metrics_eval(timeline, metric_reporter)
             if self.stop_fl_training(
                 epoch=epoch,
-                round=round,  # pyre-fixme[61]: `round` may not be initialized here.
+                # pyre-fixme[61]: `round` may not be initialized here.
+                round=round,
                 num_rounds_in_epoch=num_rounds_in_epoch,
             ):
                 break
@@ -310,7 +332,8 @@ class SyncTrainer(FLTrainer):
         global_round_num = (epoch - 1) * num_rounds_in_epoch + round
         return (
             (global_round_num / num_rounds_in_epoch)
-            >= self.cfg.epochs  # pyre-fixme[16]: `SyncTrainer` has no attribute `cfg`.
+            # pyre-fixme[16]: `SyncTrainer` has no attribute `cfg`.
+            >= self.cfg.epochs
             or self._timeout_simulator.stop_fl()
         )
 
@@ -320,7 +343,8 @@ class SyncTrainer(FLTrainer):
         """
         sort users by their training time, and only keep num_users_keep users
         """
-        all_training_times = [c.get_total_training_time() for c in clents_triggered]
+        all_training_times = [c.get_total_training_time()
+                              for c in clents_triggered]
         all_training_times.sort()
         # only select first num_users_keep userids sort by their finish time
         num_users_keep = min([num_users_keep, len(all_training_times)])
@@ -347,7 +371,8 @@ class SyncTrainer(FLTrainer):
         epoch: int,
     ) -> List[Client]:
         # pyre-fixme[16]: `SyncTrainer` has no attribute `cfg`.
-        num_users_overselected = math.ceil(users_per_round / self.cfg.dropout_rate)
+        num_users_overselected = math.ceil(
+            users_per_round / self.cfg.dropout_rate)
         user_indices_overselected = self.server.select_clients_for_training(
             num_total_users=num_users,
             users_per_round=num_users_overselected,
@@ -379,26 +404,37 @@ class SyncTrainer(FLTrainer):
         agg_metric_clients: clients for evaluating the post-aggregation training metrics
         metric_reporter: the metric reporter to pass to other methods
         """
-        t = time()
         self.server.init_round()
-        self.logger.info(f"Round initialization took {time() - t} s.")
-
-        t = time()
+        norms = []
+        deltas = []
         for client in clients:
-            message = client.generate_local_update(self.global_model(), metric_reporter)
+            message = client.generate_local_update(
+                self.global_model(), metric_reporter)
+            delta = message.model.fl_get_module()
+
+            norms.append(norm(delta))
+            deltas.append(delta)
             self.server.receive_update_from_client(message)
-        self.logger.info(f"Collecting round's clients took {time() - t} s.")
 
-        t = time()
+        cos = []
+        for i in range(len(deltas)):
+            for j in range(i + 1, len(deltas)):
+                d1, d2 = deltas[i], deltas[j]
+                cos.append(cosine(d1, d2).item())
         self.server.step()
-        self.logger.info(f"Finalizing round took {time() - t} s.")
 
-        t = time()
+        norm_avg = norm(self.server._aggregator._buffer_module)
+
         self._report_train_metrics(
             model=self.global_model(),
             timeline=timeline,
             metric_reporter=metric_reporter,
+            extra_metrics=[Metric("Norm", np.mean(norms)),
+                           Metric("Cosine", np.mean(cos)),
+                           Metric("Norm_Avg", norm_avg)
+                           ]
         )
+
         self._evaluate_global_model_after_aggregation(
             clients=agg_metric_clients,
             model=self.global_model(),
@@ -410,7 +446,6 @@ class SyncTrainer(FLTrainer):
             timeline,
             metric_reporter,
         )
-        self.logger.info(f"Aggregate round reporting took {time() - t} s.")
 
     def _choose_clients_for_post_aggregation_metrics(
         self,
@@ -618,7 +653,8 @@ class SyncTrainer(FLTrainer):
                     ("Standard Deviation", "standard_deviation_val"),
                     ("Num Samples", "num_samples"),
                 ]:
-                    score = client_stats_trackers[score_name].__getattribute__(stat_key)
+                    score = client_stats_trackers[score_name].__getattribute__(
+                        stat_key)
                     reportable_client_metrics.append(Metric(stat_name, score))
 
             metric_reporter.report_metrics(

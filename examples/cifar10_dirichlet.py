@@ -257,7 +257,7 @@ def train(
     world_size: int = 1,
     rank: int = 0,
 ) -> CIFAROutput:
-    data_provider = build_data_provider(data_config)
+    
 
     for seed in range(model_config.num_trials):
         cuda_enabled = torch.cuda.is_available() and use_cuda_if_available
@@ -296,7 +296,7 @@ def train(
             trainer_config, model=global_model, cuda_enabled=cuda_enabled
         )
         print(f"Created {trainer_config._target_}")
-
+        data_provider = build_data_provider(data_config)
         final_model, eval_score = trainer.train(
             data_provider=data_provider,
             metric_reporter=metrics_reporter,
@@ -336,28 +336,28 @@ def run(cfg: DictConfig) -> None:
         fb_info=None,
         world_size=1,
     )
-    if cfg.cluster:
-        checkpoint_name = f"{args.optim}_server-lr_{args.server_lr}_client-lr_{args.client_lr}_seed_{args.seed}_pretrained_{args.pretrained}"
-        # executor is the submission interface (logs are dumped in the folder)
-        executor = submitit.AutoExecutor(folder="stackoverflow_logs")
+    # if cfg.cluster:
+    #     checkpoint_name = f"{args.optim}_server-lr_{args.server_lr}_client-lr_{args.client_lr}_seed_{args.seed}_pretrained_{args.pretrained}"
+    #     # executor is the submission interface (logs are dumped in the folder)
+    #     executor = submitit.AutoExecutor(folder="stackoverflow_logs")
 
-        # set parameters for running the job
-        num_gpus_per_node = 1
-        nodes = 1
-        executor.update_parameters(
-            name=checkpoint_name,
-            gpus_per_node=num_gpus_per_node,
-            tasks_per_node=1,  # one task per GPU
-            cpus_per_task=10,  # 10 cpus per gpu is generally good
-            nodes=nodes,
-            # Below are cluster dependent parameters
-            slurm_partition="a100",
-            slurm_time=3000,  # 3000 mins
-        )
-        job = executor.submit(
-            train, args
-        )
-        print(job.job_id, checkpoint_name)  # ID of your job
+    #     # set parameters for running the job
+    #     num_gpus_per_node = 1
+    #     nodes = 1
+    #     executor.update_parameters(
+    #         name=checkpoint_name,
+    #         gpus_per_node=num_gpus_per_node,
+    #         tasks_per_node=1,  # one task per GPU
+    #         cpus_per_task=10,  # 10 cpus per gpu is generally good
+    #         nodes=nodes,
+    #         # Below are cluster dependent parameters
+    #         slurm_partition="a100",
+    #         slurm_time=3000,  # 3000 mins
+    #     )
+    #     job = executor.submit(
+    #         train, args
+    #     )
+    #     print(job.job_id, checkpoint_name)  # ID of your job
 
 if __name__ == "__main__":
     cfg = maybe_parse_json_config()
